@@ -5,8 +5,9 @@ import {
   PanelLeftClose, PanelLeftOpen, Paperclip, Plus, Search, Settings,
   ShieldCheck, Sparkles, Terminal, ThumbsDown, ThumbsUp, Workflow, X,
 } from 'lucide-react'
-import { generalAgent, models, promptIdeas, providers, starterChats } from './mock/data'
-import type { Agent, Chat, Message } from './types'
+import { generalAgent, promptIdeas } from './mock/data'
+import type { Agent, Chat, Message, ModelInfo } from './types'
+import * as api from './services/api'
 import bulbulitoLogo from './assets/BAI.png'
 import './App.css'
 
@@ -51,21 +52,21 @@ function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onDele
 
 function MessageIcon({ active }: { active: boolean }) { return <MessageSquarePlus size={15} className={active ? 'history-icon selected' : 'history-icon'} /> }
 
-function ModelPicker({ current, onChange }: { current: string; onChange: (id: string) => void }) {
+function ModelPicker({ current, models, onChange }: { current: string; models: ModelInfo[]; onChange: (id: string) => void }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const model = models.find((item) => item.id === current) ?? models[0]
   const filtered = models.filter((item) => item.name.toLowerCase().includes(query.toLowerCase()))
-  return <div className="model-picker-wrap"><button className={`model-picker ${open ? 'model-open' : ''}`} onClick={() => setOpen((value) => !value)}><span className="model-spark"><Sparkles size={13} /></span><span>{model.name}</span><ChevronDown size={14} /></button>
-    {open && <><button className="click-away" aria-label="Close model menu" onClick={() => setOpen(false)} /><div className="model-menu"><div className="model-menu-heading">CHOOSE A MODEL <span>LOCAL + CLOUD</span></div><label className="model-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a model" autoFocus /></label>{filtered.map((item) => <button key={item.id} className={`model-option ${current === item.id ? 'chosen' : ''}`} onClick={() => { onChange(item.id); setOpen(false); setQuery('') }}><span className="model-option-icon"><Sparkles size={14} /></span><span className="model-option-copy"><strong>{item.name}</strong><small>{item.note}</small></span><span className="model-provider">{item.provider}</span>{current === item.id && <Check size={15} />}</button>)}<div className="model-menu-footer">More providers can be connected in settings</div></div></>}
+  return <div className="model-picker-wrap"><button className={`model-picker ${open ? 'model-open' : ''}`} onClick={() => setOpen((value) => !value)} disabled={!model}><span className="model-spark"><Sparkles size={13} /></span><span>{model?.name ?? 'Loading models…'}</span><ChevronDown size={14} /></button>
+    {open && <><button className="click-away" aria-label="Close model menu" onClick={() => setOpen(false)} /><div className="model-menu"><div className="model-menu-heading">CHOOSE A MODEL <span>LOCAL + CLOUD</span></div><label className="model-search"><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a model" autoFocus /></label>{filtered.map((item) => <button key={item.id} className={`model-option ${current === item.id ? 'chosen' : ''}`} onClick={() => { onChange(item.id); setOpen(false); setQuery('') }}><span className="model-option-icon"><Sparkles size={14} /></span><span className="model-option-copy"><strong>{item.name}</strong><small>{item.description}</small></span><span className="model-provider">{item.provider}</span>{current === item.id && <Check size={15} />}</button>)}<div className="model-menu-footer">Provider credentials are managed by the local backend</div></div></>}
   </div>
 }
 
-function Header({ title, modelId, onModel, onSettings, onSidebar }: { title: string; modelId: string; onModel: (id: string) => void; onSettings: () => void; onSidebar: () => void }) {
-  return <header className="topbar"><div className="topbar-title"><button className="icon-button mobile-menu" onClick={onSidebar} aria-label="Toggle sidebar"><Menu size={18} /></button><div className="breadcrumbs"><span className="breadcrumb-muted">Workspace</span><ChevronRight size={13} /><strong>{title}</strong></div></div><div className="topbar-actions"><div className="local-indicator"><span />Local workspace</div><ModelPicker current={modelId} onChange={onModel} /><button className="icon-button header-settings" aria-label="Settings" onClick={onSettings}><Settings size={17} /></button></div></header>
+function Header({ title, modelId, models, onModel, onSettings, onSidebar }: { title: string; modelId: string; models: ModelInfo[]; onModel: (id: string) => void; onSettings: () => void; onSidebar: () => void }) {
+  return <header className="topbar"><div className="topbar-title"><button className="icon-button mobile-menu" onClick={onSidebar} aria-label="Toggle sidebar"><Menu size={18} /></button><div className="breadcrumbs"><span className="breadcrumb-muted">Workspace</span><ChevronRight size={13} /><strong>{title}</strong></div></div><div className="topbar-actions"><div className="local-indicator"><span />Local workspace</div><ModelPicker current={modelId} models={models} onChange={onModel} /><button className="icon-button header-settings" aria-label="Settings" onClick={onSettings}><Settings size={17} /></button></div></header>
 }
 
-function Composer({ onSend, placeholder = 'Ask Bulbulito anything...', compact = false }: { onSend: (text: string) => void; placeholder?: string; compact?: boolean }) {
+function Composer({ onSend, placeholder = 'Ask Bulbulito anything...', compact = false, disabled = false }: { onSend: (text: string) => void; placeholder?: string; compact?: boolean; disabled?: boolean }) {
   const [value, setValue] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
@@ -74,7 +75,7 @@ function Composer({ onSend, placeholder = 'Ask Bulbulito anything...', compact =
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }
   const resize = () => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 180)}px` } }
   return <div className={`composer-shell ${compact ? 'composer-compact' : ''}`}><form className="composer" onSubmit={submit}><textarea ref={textarea} value={value} onChange={(event) => { setValue(event.target.value); resize() }} onKeyDown={keyDown} placeholder={placeholder} rows={1} aria-label="Message Bulbulito" />
-    <div className="composer-toolbar"><div className="composer-left"><button type="button" className="composer-tool" title="Attach a file"><Paperclip size={16} /></button><div className="tools-wrap"><button type="button" className={`composer-tool tools-button ${toolsOpen ? 'tool-active' : ''}`} onClick={() => setToolsOpen((value) => !value)}><Plus size={16} /><span>Tools</span></button>{toolsOpen && <><button className="click-away" onClick={() => setToolsOpen(false)} aria-label="Close tools" /><div className="tools-menu"><div className="tools-menu-title">ADD A TOOL <span>COMING SOON</span></div><div><Globe2 size={15} />Web search</div><div><FileUp size={15} />Analyze files</div><div><Terminal size={15} />Run Python</div></div></>}</div><span className="composer-context">Local workspace</span></div><div className="composer-right"><span className="key-hint"><kbd>↵</kbd> to send</span><button type="submit" className="send-button" disabled={!value.trim()} aria-label="Send message"><ArrowUp size={18} /></button></div></div>
+    <div className="composer-toolbar"><div className="composer-left"><button type="button" className="composer-tool" title="Attach a file"><Paperclip size={16} /></button><div className="tools-wrap"><button type="button" className={`composer-tool tools-button ${toolsOpen ? 'tool-active' : ''}`} onClick={() => setToolsOpen((value) => !value)}><Plus size={16} /><span>Tools</span></button>{toolsOpen && <><button className="click-away" onClick={() => setToolsOpen(false)} aria-label="Close tools" /><div className="tools-menu"><div className="tools-menu-title">ADD A TOOL <span>COMING SOON</span></div><div><Globe2 size={15} />Web search</div><div><FileUp size={15} />Analyze files</div><div><Terminal size={15} />Run Python</div></div></>}</div><span className="composer-context">Local workspace</span></div><div className="composer-right"><span className="key-hint"><kbd>↵</kbd> to send</span><button type="submit" className="send-button" disabled={!value.trim() || disabled} aria-label="Send message"><ArrowUp size={18} /></button></div></div>
   </form><div className="composer-disclaimer">Bulbulito can make mistakes. Check important information.</div></div>
 }
 
@@ -111,10 +112,10 @@ function MessageItem({ message, onRate }: { message: Message; onRate: (id: strin
   return <article className={`message-row ${isAssistant ? 'assistant-row' : 'user-row'}`}>{isAssistant ? <AssistantAvatar /> : <div className="user-avatar">J</div>}<div className="message-main"><div className="message-label"><strong>{isAssistant ? 'Bulbulito' : 'You'}</strong><time>{message.createdAt}</time></div><MessageBody content={message.content} />{isAssistant && <div className="message-actions"><button onClick={copy} title="Copy response">{copied ? <Check size={14} /> : <Copy size={14} />}<span>{copied ? 'Copied' : 'Copy'}</span></button><button title="Regenerate response"><ArrowDown size={14} /><span>Regenerate</span></button><span className="action-divider" /><button className={message.liked === true ? 'rated' : ''} aria-label="Helpful" onClick={() => onRate(message.id, message.liked === true ? null : true)}><ThumbsUp size={14} /></button><button className={message.liked === false ? 'rated' : ''} aria-label="Not helpful" onClick={() => onRate(message.id, message.liked === false ? null : false)}><ThumbsDown size={14} /></button></div>}</div></article>
 }
 
-function Conversation({ chat, onRate, onSend }: { chat: Chat; onRate: (id: string, rating: boolean | null) => void; onSend: (text: string) => void }) {
+function Conversation({ chat, onRate, onSend, sending }: { chat: Chat; onRate: (id: string, rating: boolean | null) => void; onSend: (text: string) => void; sending: boolean }) {
   const messagesEnd = useRef<HTMLDivElement>(null)
   useEffect(() => { messagesEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.messages.length])
-  return <><div className="conversation-scroll"><div className="conversation-inner">{chat.messages.length ? chat.messages.map((message) => <MessageItem key={message.id} message={message} onRate={onRate} />) : <div className="empty-chat"><BulbulitoMark size="large" /><h2>Ready when you are.</h2><p>Your conversation starts with a question, a problem, or a curious thought.</p></div>}<div ref={messagesEnd} /></div></div><Composer onSend={onSend} /></>
+  return <><div className="conversation-scroll"><div className="conversation-inner">{chat.messages.length ? chat.messages.map((message) => <MessageItem key={message.id} message={message} onRate={onRate} />) : <div className="empty-chat"><BulbulitoMark size="large" /><h2>Ready when you are.</h2><p>Your conversation starts with a question, a problem, or a curious thought.</p></div>}{sending && <div className="message-row assistant-row"><AssistantAvatar /><div className="message-main"><div className="message-label"><strong>Bulbulito</strong></div><p className="message-content">Thinking…</p></div></div>}<div ref={messagesEnd} /></div></div><Composer onSend={onSend} disabled={sending} /></>
 }
 
 function Landing({ onPrompt }: { onPrompt: (text: string) => void }) {
@@ -124,43 +125,80 @@ function Landing({ onPrompt }: { onPrompt: (text: string) => void }) {
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState('General')
-  const [provider, setProvider] = useState('local')
   const sections = ['General', 'LLM Provider', 'Context & Memory', 'System Prompt', 'Agent Settings']
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><div><span className="settings-kicker">PREFERENCES</span><h2 id="settings-title">Workspace settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={18} /></button></header><div className="settings-body"><nav className="settings-nav">{sections.map((item) => <button key={item} className={section === item ? 'selected' : ''} onClick={() => setSection(item)}>{item}</button>)}</nav><div className="settings-panel">{section === 'General' && <><h3>Appearance</h3><p className="settings-description">Make the workspace feel like yours.</p><label className="settings-row"><span><strong>Theme</strong><small>Color palette for your workspace</small></span><select defaultValue="dark"><option value="dark">Midnight</option><option value="system">System</option></select></label><label className="settings-row"><span><strong>Accent</strong><small>A subtle highlight color</small></span><span className="accent-choice"><i /><i /><i className="selected" /><i /></span></label><div className="settings-divider" /><h3>API Key</h3><p className="settings-description">Credentials are stored locally in your browser.</p><label className="field-label">API key</label><input className="settings-input" type="password" placeholder="Paste a provider key" autoComplete="new-password" /><p className="field-footnote">Keys are never included in chat history.</p></>}{section === 'LLM Provider' && <><h3>LLM Provider</h3><p className="settings-description">Choose where your model runs.</p>{providers.map((item) => <label key={item.id} className={`provider-card ${provider === item.id ? 'chosen' : ''}`}><input type="radio" name="provider" value={item.id} checked={provider === item.id} onChange={() => setProvider(item.id)} /><span><strong>{item.name}</strong><small>{item.configured ? 'Connected and ready' : 'Add credentials to connect'}</small></span><span className="provider-state">{item.configured ? 'READY' : 'NOT SET'}</span></label>)}<label className="settings-row"><span><strong>Model</strong><small>Default model for new chats</small></span><select defaultValue="gpt-oss">{models.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label className="field-label">API key</label><input className="settings-input" type="password" placeholder="Paste a provider key" autoComplete="new-password" /></>}{section === 'Context & Memory' && <><h3>Context & Memory</h3><p className="settings-description">Control what Bulbulito can remember between conversations.</p><label className="settings-row"><span><strong>Conversation memory</strong><small>Keep local chat history on this device</small></span><input type="checkbox" defaultChecked /></label><label className="settings-row"><span><strong>Context window</strong><small>Maximum conversation context</small></span><select defaultValue="32"><option value="8">8k tokens</option><option value="32">32k tokens</option><option value="128">128k tokens</option></select></label><div className="note-card"><ShieldCheck size={16} /><span>Chat history is stored locally in this browser.</span></div></>}{section === 'System Prompt' && <><h3>System Prompt</h3><p className="settings-description">Give your assistant a little direction.</p><textarea className="system-prompt" defaultValue="You are Bulbulito, a thoughtful and practical AI assistant. Be clear, helpful, and direct." /><p className="field-footnote">This instruction is sent along with new conversations.</p></>}{section === 'Agent Settings' && <><h3>Agent Settings</h3><p className="settings-description">Your agent lineup is taking shape.</p><div className="agent-preview-card"><AgentIdentity agent={generalAgent} /><span className="agent-current-badge">CURRENT</span></div><div className="future-agent-row"><span className="future-agent-icon"><Code2 size={17} /></span><span><strong>Bulbulito Code</strong><small>Coding agent · coming later</small></span><span className="soon-tag">SOON</span></div><div className="future-agent-row"><span className="future-agent-icon"><Search size={17} /></span><span><strong>Bulbulito Research</strong><small>Research agent · coming later</small></span><span className="soon-tag">SOON</span></div></>}</div></div><footer className="settings-footer"><span>Changes are saved in this session</span><button onClick={onClose}>Done</button></footer></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><div><span className="settings-kicker">PREFERENCES</span><h2 id="settings-title">Workspace settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={18} /></button></header><div className="settings-body"><nav className="settings-nav">{sections.map((item) => <button key={item} className={section === item ? 'selected' : ''} onClick={() => setSection(item)}>{item}</button>)}</nav><div className="settings-panel">{section === 'General' && <><h3>Appearance</h3><p className="settings-description">Make the workspace feel like yours.</p><label className="settings-row"><span><strong>Theme</strong><small>Color palette for your workspace</small></span><select defaultValue="dark"><option value="dark">Midnight</option><option value="system">System</option></select></label><label className="settings-row"><span><strong>Accent</strong><small>A subtle highlight color</small></span><span className="accent-choice"><i /><i /><i className="selected" /><i /></span></label><div className="settings-divider" /><h3>Local credentials</h3><p className="settings-description">Provider credentials are read only by the local backend from the project root .env file. They are never stored in this browser.</p></>}{section === 'LLM Provider' && <><h3>LLM Provider</h3><p className="settings-description">Choose a model from the selector in the top bar. Configure provider credentials in the project root .env file, then restart the backend.</p></>}{section === 'Context & Memory' && <><h3>Context & Memory</h3><p className="settings-description">Conversation messages are saved locally by the backend.</p><div className="note-card"><ShieldCheck size={16} /><span>Chat history is stored as JSON on this device.</span></div></>}{section === 'System Prompt' && <><h3>System Prompt</h3><p className="settings-description">The backend applies Bulbulito's default system instruction to each chat.</p></>}{section === 'Agent Settings' && <><h3>Agent Settings</h3><p className="settings-description">Your agent lineup is taking shape.</p><div className="agent-preview-card"><AgentIdentity agent={generalAgent} /><span className="agent-current-badge">CURRENT</span></div><div className="future-agent-row"><span className="future-agent-icon"><Code2 size={17} /></span><span><strong>Bulbulito Code</strong><small>Coding agent · coming later</small></span><span className="soon-tag">SOON</span></div><div className="future-agent-row"><span className="future-agent-icon"><Search size={17} /></span><span><strong>Bulbulito Research</strong><small>Research agent · coming later</small></span><span className="soon-tag">SOON</span></div></>}</div></div><footer className="settings-footer"><span>Changes are saved in this session</span><button onClick={onClose}>Done</button></footer></section></div>
 }
 
 function App() {
-  const [chats, setChats] = useState(starterChats)
+  const [chats, setChats] = useState<Chat[]>([])
+  const [models, setModels] = useState<ModelInfo[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
-  const [modelId, setModelId] = useState(models[0].id)
+  const [modelId, setModelId] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const activeChat = chats.find((chat) => chat.id === activeId) ?? null
   const title = activeChat?.title ?? 'New conversation'
-  const createChat = (initialText?: string) => {
-    const now = new Date()
-    const id = `chat-${now.getTime()}`
-    const chat: Chat = { id, title: initialText ? initialText.slice(0, 34) : 'New conversation', group: 'Today', updatedAt: now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), messages: [] }
-    setChats((current) => [chat, ...current]); setActiveId(id)
-    if (initialText) sendMessage(initialText, id)
+  const refreshChats = async () => {
+    try { setChats(await api.getChats()) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load conversations.') }
   }
-  const sendMessage = (text: string, targetId = activeId) => {
-    if (!targetId) { createChat(text); return }
-    const userMessage: Message = { id: `user-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }
-    setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, title: chat.messages.length ? chat.title : text.slice(0, 34), messages: [...chat.messages, userMessage] } : chat))
-    window.setTimeout(() => {
-      const response: Message = { id: `assistant-${Date.now()}`, role: 'assistant', content: `That's a good question. Here's a practical way to think about **${text.replace(/[?.!]+$/, '')}**.\n\nStart by breaking it into the smaller pieces that matter, then test each part with a simple example. If you share a bit more context, I can help work through the details with you.\n\n- Identify the goal and any constraints\n- Build the smallest useful version\n- Check the result and refine from there`, createdAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }
-      setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, messages: [...chat.messages, response] } : chat))
-    }, 700)
+  const createChat = async (initialText?: string) => {
+    setError(null)
+    try {
+      const chat = await api.createChat(modelId || undefined)
+      setChats((current) => [chat, ...current.filter((item) => item.id !== chat.id)])
+      setActiveId(chat.id)
+      if (initialText) await sendMessage(initialText, chat.id, modelId || chat.model)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create conversation.') }
+  }
+  const selectChat = async (id: string) => {
+    setActiveId(id)
+    setError(null)
+    try {
+      const chat = await api.getChat(id)
+      setChats((current) => current.map((item) => item.id === id ? chat : item))
+      setModelId(chat.model)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load conversation.') }
+  }
+  const sendMessage = async (text: string, targetId = activeId, selectedModel = modelId) => {
+    if (!targetId) { await createChat(text); return }
+    if (!selectedModel || sending) return
+    setError(null)
+    const userMessage: Message = { id: `pending-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }
+    setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, messages: [...chat.messages, userMessage] } : chat))
+    setSending(true)
+    try {
+      const updated = await api.sendMessage(targetId, selectedModel, text)
+      setChats((current) => current.map((chat) => chat.id === targetId ? updated : chat))
+      setModelId(updated.model)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not send your message.')
+      setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, messages: chat.messages.filter((message) => message.id !== userMessage.id) } : chat))
+    } finally { setSending(false) }
   }
   const rateMessage = (messageId: string, rating: boolean | null) => setChats((current) => current.map((chat) => ({ ...chat, messages: chat.messages.map((message) => message.id === messageId ? { ...message, liked: rating } : message) })))
-  const deleteChat = (id: string) => { setChats((current) => current.filter((chat) => chat.id !== id)); if (activeId === id) setActiveId(null) }
+  const deleteChat = async (id: string) => {
+    setError(null)
+    try {
+      await api.deleteChat(id)
+      setChats((current) => current.filter((chat) => chat.id !== id))
+      if (activeId === id) setActiveId(null)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not delete conversation.') }
+  }
+  useEffect(() => {
+    void api.getModels().then((available) => {
+      setModels(available)
+      setModelId((current) => current || available[0]?.id || '')
+    }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : 'Could not load models.'))
+    void refreshChats()
+  }, [])
   useEffect(() => {
     const hotkey = (event: globalThis.KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) } if (event.key === 'Escape') { setSearchOpen(false); setSettingsOpen(false) } }
     window.addEventListener('keydown', hotkey); return () => window.removeEventListener('keydown', hotkey)
   }, [])
-  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => createChat()} onSelect={setActiveId} onDelete={deleteChat} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={sendMessage} /> : <Landing onPrompt={(text) => createChat(text)} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { setActiveId(id); setSearchOpen(false) }} />}</div>
+  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => void createChat()} onSelect={(id) => void selectChat(id)} onDelete={(id) => void deleteChat(id)} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} models={models} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{error && <div role="alert" className="backend-error">{error}<button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={(text) => void sendMessage(text)} sending={sending} /> : <Landing onPrompt={(text) => void createChat(text)} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { void selectChat(id); setSearchOpen(false) }} />}</div>
 }
 
 function SearchDialog({ chats, onClose, onSelect }: { chats: Chat[]; onClose: () => void; onSelect: (id: string) => void }) {

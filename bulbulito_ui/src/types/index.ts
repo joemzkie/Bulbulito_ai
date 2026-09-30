@@ -1,4 +1,4 @@
-export type MessageRole = 'user' | 'assistant'
+export type MessageRole = 'system' | 'user' | 'assistant'
 
 export interface Message {
   id: string
@@ -13,20 +13,17 @@ export interface Chat {
   title: string
   group: 'Today' | 'Recent' | 'Older'
   updatedAt: string
+  model: string
+  created_at: string
+  updated_at: string
   messages: Message[]
 }
 
-export interface Model {
+export interface ModelInfo {
   id: string
   name: string
   provider: string
-  note: string
-}
-
-export interface Provider {
-  id: string
-  name: string
-  configured: boolean
+  description: string
 }
 
 export interface Agent {
