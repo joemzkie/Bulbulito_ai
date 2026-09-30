@@ -97,13 +97,13 @@ MODEL_REGISTRY = {
     },
     "or-qwen-coder": {
         "provider": "openrouter",
-        "model_id": "qwen/qwen-2.5-coder-32b-instruct:free",
-        "name": "Qwen 2.5 Coder 32B Free (OpenRouter)",
-        "description": "Free dedicated code generation and debugging"
+        "model_id": "qwen/qwen3.8-27b:free",
+        "name": "Qwen3.8 27B Free (OpenRouter)",
+        "description": "Free model for coding, research, and structured tasks"
     },
     "or-nemotron-ultra": {
         "provider": "openrouter",
-        "model_id": "nvidia/nemotron-3-ultra:free",
+        "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
         "name": "Nemotron 3 Ultra Free (OpenRouter)",
         "description": "Free agentic reasoning and research"
     },

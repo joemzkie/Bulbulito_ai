@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.core.config import SYSTEM_PROMPT
-from app.providers.client import ProviderNotConfiguredError, call_chatbot
+from app.providers.client import ProviderNotConfiguredError, ProviderRequestError, call_chatbot
 from app.providers.registry import MODEL_REGISTRY
 from app.storage.json_storage import storage
 
@@ -24,6 +24,8 @@ def send_message(chat_id: str, model: str, content: str) -> dict:
         answer = call_chatbot(model, history)
     except ProviderNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail="The selected provider could not complete the request.") from exc
 

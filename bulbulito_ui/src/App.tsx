@@ -26,10 +26,79 @@ function AgentIdentity({ agent }: { agent: Agent }) {
   return <div className="agent-identity"><BulbulitoMark size="small" /><span className="agent-copy"><strong>{agent.name}</strong><span>{agent.role}</span></span><span className="online-dot" title="Online" /></div>
 }
 
-function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onDelete, onSettings }: {
+function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onRename, onDelete, onSettings }: {
   chats: Chat[]; activeId: string | null; collapsed: boolean; onToggle: () => void; onNew: () => void
-  onSelect: (id: string) => void; onDelete: (id: string) => void; onSettings: () => void
+  onSelect: (id: string) => void; onRename: (id: string, title: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>; onSettings: () => void
 }) {
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const [savingRename, setSavingRename] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (!openMenuId) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpenMenuId(null)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    return () => document.removeEventListener('pointerdown', closeOnOutsideClick)
+  }, [openMenuId])
+  useEffect(() => {
+    if (editingId) renameInputRef.current?.focus()
+  }, [editingId])
+  useEffect(() => {
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (pendingDeleteId) setPendingDeleteId(null)
+      else if (editingId) {
+        setEditingId(null)
+        setRenameError(null)
+      }
+      setOpenMenuId(null)
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [editingId, pendingDeleteId])
+
+  const beginRename = (chat: Chat) => {
+    setOpenMenuId(null)
+    setRenameError(null)
+    setDraftTitle(chat.title)
+    setEditingId(chat.id)
+  }
+  const saveRename = async (event: FormEvent, chatId: string) => {
+    event.preventDefault()
+    const title = draftTitle.trim()
+    if (!title) {
+      setRenameError('A conversation title is required.')
+      return
+    }
+    setSavingRename(true)
+    setRenameError(null)
+    try {
+      await onRename(chatId, title)
+      setEditingId(null)
+    } catch (cause) {
+      setRenameError(cause instanceof Error ? cause.message : 'Could not rename conversation.')
+    } finally {
+      setSavingRename(false)
+    }
+  }
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return
+    const chatId = pendingDeleteId
+    try {
+      await onDelete(chatId)
+      setPendingDeleteId(null)
+    } catch {
+      // The app-level error banner reports a failed delete; keep confirmation open.
+    }
+  }
+
   const groups: Chat['group'][] = ['Today', 'Recent', 'Older']
   const groupIcons = { Today: 'TODAY', Recent: 'RECENT', Older: 'OLDER' }
   return <aside className={`sidebar ${collapsed ? 'sidebar-collapsed' : ''}`}>
@@ -40,14 +109,28 @@ function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onDele
         const items = chats.filter((chat) => chat.group === group)
         if (!items.length) return null
         return <section className="history-group" key={group}><div className="section-label">{groupIcons[group]}</div>{items.map((chat) => <div className={`history-item ${activeId === chat.id ? 'active' : ''}`} key={chat.id}>
-          <button className="history-select" onClick={() => onSelect(chat.id)} title={chat.title}><MessageIcon active={activeId === chat.id} /><span>{chat.title}</span></button>
-          <button className="history-more" aria-label={`Actions for ${chat.title}`} onClick={() => onDelete(chat.id)} title="Delete conversation"><Ellipsis size={16} /></button>
+          {editingId === chat.id ? <form className="history-rename-form" onSubmit={(event) => void saveRename(event, chat.id)}>
+            <input ref={renameInputRef} className="history-rename-input" value={draftTitle} maxLength={120} aria-label="Conversation title" onChange={(event) => { setDraftTitle(event.target.value); setRenameError(null) }} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingId(null); setRenameError(null) } }} />
+            <div className="history-rename-actions"><button type="submit" disabled={savingRename || !draftTitle.trim()}>Save</button><button type="button" disabled={savingRename} onClick={() => { setEditingId(null); setRenameError(null) }}>Cancel</button></div>
+            {renameError && <span className="history-rename-error" role="alert">{renameError}</span>}
+          </form> : <button className="history-select" onClick={() => onSelect(chat.id)} title={chat.title}><MessageIcon active={activeId === chat.id} /><span>{chat.title}</span></button>}
+          <button className="history-more" aria-label={`Actions for ${chat.title}`} aria-haspopup="menu" aria-expanded={openMenuId === chat.id} onClick={(event) => { event.stopPropagation(); setOpenMenuId((current) => current === chat.id ? null : chat.id) }} title="Conversation actions"><Ellipsis size={16} /></button>
+          {openMenuId === chat.id && <div ref={menuRef} className="chat-context-menu" role="menu" aria-label={`Actions for ${chat.title}`}>
+            <button role="menuitem" onClick={(event) => { event.stopPropagation(); beginRename(chat) }}>Rename</button>
+            <button role="menuitem" className="chat-context-delete" onClick={(event) => { event.stopPropagation(); setOpenMenuId(null); setPendingDeleteId(chat.id) }}>Delete</button>
+          </div>}
         </div>)}</section>
       })}
       <div className="tools-preview"><div className="section-label">WORKSPACE</div><div className="future-tool"><FolderOpen size={15} /><span>Local files</span><span className="soon-tag">SOON</span></div><div className="future-tool"><Globe2 size={15} /><span>Web research</span><span className="soon-tag">SOON</span></div></div>
     </div>
     <div className="sidebar-bottom"><AgentIdentity agent={generalAgent} /><button className="sidebar-setting" onClick={onSettings}><Settings size={16} /><span>Settings & providers</span><ChevronRight size={14} className="setting-chevron" /></button><div className="storage-status"><span className="storage-led" /><span>Local storage</span><span className="storage-label">READY</span></div></div>
+    {pendingDeleteId && <DeleteConversationDialog chat={chats.find((chat) => chat.id === pendingDeleteId) ?? null} onCancel={() => setPendingDeleteId(null)} onConfirm={() => void confirmDelete()} />}
   </aside>
+}
+
+function DeleteConversationDialog({ chat, onCancel, onConfirm }: { chat: Chat | null; onCancel: () => void; onConfirm: () => void }) {
+  if (!chat) return null
+  return <div className="modal-backdrop delete-confirm-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}><section className="delete-confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-chat-title" aria-describedby="delete-chat-description"><h2 id="delete-chat-title">Delete conversation?</h2><p id="delete-chat-description">This action cannot be undone.</p><div className="delete-confirm-actions"><button type="button" onClick={onCancel}>Cancel</button><button type="button" className="confirm-delete-button" onClick={onConfirm}>Delete</button></div></section></div>
 }
 
 function MessageIcon({ active }: { active: boolean }) { return <MessageSquarePlus size={15} className={active ? 'history-icon selected' : 'history-icon'} /> }
@@ -179,13 +262,21 @@ function App() {
     } finally { setSending(false) }
   }
   const rateMessage = (messageId: string, rating: boolean | null) => setChats((current) => current.map((chat) => ({ ...chat, messages: chat.messages.map((message) => message.id === messageId ? { ...message, liked: rating } : message) })))
+  const renameChat = async (id: string, title: string) => {
+    const updated = await api.renameChat(id, title)
+    setChats((current) => current.map((chat) => chat.id === id ? updated : chat))
+  }
   const deleteChat = async (id: string) => {
     setError(null)
     try {
       await api.deleteChat(id)
       setChats((current) => current.filter((chat) => chat.id !== id))
       if (activeId === id) setActiveId(null)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not delete conversation.') }
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'Could not delete conversation.'
+      setError(message)
+      throw cause instanceof Error ? cause : new Error(message)
+    }
   }
   useEffect(() => {
     void api.getModels().then((available) => {
@@ -198,7 +289,7 @@ function App() {
     const hotkey = (event: globalThis.KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) } if (event.key === 'Escape') { setSearchOpen(false); setSettingsOpen(false) } }
     window.addEventListener('keydown', hotkey); return () => window.removeEventListener('keydown', hotkey)
   }, [])
-  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => void createChat()} onSelect={(id) => void selectChat(id)} onDelete={(id) => void deleteChat(id)} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} models={models} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{error && <div role="alert" className="backend-error">{error}<button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={(text) => void sendMessage(text)} sending={sending} /> : <Landing onPrompt={(text) => void createChat(text)} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { void selectChat(id); setSearchOpen(false) }} />}</div>
+  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => void createChat()} onSelect={(id) => void selectChat(id)} onRename={renameChat} onDelete={deleteChat} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} models={models} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{error && <div role="alert" className="backend-error">{error}<button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={(text) => void sendMessage(text)} sending={sending} /> : <Landing onPrompt={(text) => void createChat(text)} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { void selectChat(id); setSearchOpen(false) }} />}</div>
 }
 
 function SearchDialog({ chats, onClose, onSelect }: { chats: Chat[]; onClose: () => void; onSelect: (id: string) => void }) {

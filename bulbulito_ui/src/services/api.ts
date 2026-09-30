@@ -83,6 +83,13 @@ export async function sendMessage(chatId: string, model: string, content: string
   return toChat(result.conversation)
 }
 
+export async function renameChat(chatId: string, title: string): Promise<Chat> {
+  return toChat(await request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  }))
+}
+
 export async function deleteChat(chatId: string): Promise<void> {
   await request(`/chats/${encodeURIComponent(chatId)}`, { method: 'DELETE' })
 }

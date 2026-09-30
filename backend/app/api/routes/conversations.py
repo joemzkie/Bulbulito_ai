@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.providers.registry import MODEL_REGISTRY
-from app.schemas.conversation import CreateChatRequest
+from app.schemas.conversation import CreateChatRequest, RenameConversationRequest
 from app.services import conversation_service
 
 router = APIRouter(prefix="/chats", tags=["chats"])
@@ -20,6 +20,11 @@ def create_chat(request: CreateChatRequest | None = None) -> dict:
 @router.get("/{chat_id}")
 def get_chat(chat_id: str) -> dict:
     return conversation_service.get_conversation(chat_id)
+
+
+@router.patch("/{chat_id}")
+def rename_chat(chat_id: str, request: RenameConversationRequest) -> dict:
+    return conversation_service.rename_conversation(chat_id, request.title)
 
 
 @router.delete("/{chat_id}")

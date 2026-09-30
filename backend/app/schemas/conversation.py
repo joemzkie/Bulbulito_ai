@@ -22,6 +22,12 @@ class CreateChatRequest(BaseModel):
     model: str | None = None
 
 
+class RenameConversationRequest(BaseModel):
+    model_config = {"str_strip_whitespace": True}
+
+    title: str = Field(min_length=1, max_length=120)
+
+
 class SendMessageRequest(BaseModel):
     model: str
     content: str = Field(min_length=1, max_length=100000)

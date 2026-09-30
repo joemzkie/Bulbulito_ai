@@ -1,9 +1,22 @@
-from openai import OpenAI
+import logging
+
+from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from .registry import PROVIDERS, MODEL_REGISTRY
+from .openrouter import create_openrouter_client
+
+logger = logging.getLogger("bulbulito.providers")
 
 
 class ProviderNotConfiguredError(Exception):
     """Raised when the selected provider has no server-side credential."""
+
+
+class ProviderRequestError(Exception):
+    """A sanitized, user-safe upstream provider failure."""
+
+    def __init__(self, message: str, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.7) -> str:
@@ -27,10 +40,13 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
         )
 
     # 3. Dynamic client initialization
-    client = OpenAI(
-        base_url=provider_config["base_url"],
-        api_key=provider_config["api_key"]
-    )
+    if provider_name == "openrouter":
+        client = create_openrouter_client(provider_config)
+    else:
+        client = OpenAI(
+            base_url=provider_config["base_url"],
+            api_key=provider_config["api_key"]
+        )
 
     # 4. Construct payload
     payload = {
@@ -50,9 +66,54 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
         if not isinstance(content, str):
             raise RuntimeError("The provider returned an empty response.")
         return content
+    except APIStatusError as exc:
+        # OpenRouter's free model catalog changes; give a safe, useful error
+        # without returning the upstream response body or request metadata.
+        local_status_code = 502
+        if provider_name == "openrouter" and exc.status_code == 404:
+            message = f"OpenRouter model '{model_config['model_id']}' was not found or is no longer available on the free tier."
+        elif exc.status_code in (401, 403):
+            message = f"{provider_name.title()} rejected the configured credentials. Check the provider entry in the project root .env file."
+        elif exc.status_code == 402:
+            message = f"{provider_name.title()} requires available credits or a paid model for this request."
+        elif exc.status_code == 429:
+            message = f"{provider_name.title()} rate limit reached. Wait and try again."
+            local_status_code = 429
+        elif exc.status_code == 400:
+            message = f"{provider_name.title()} rejected the request parameters for model '{model_config['model_id']}'."
+        else:
+            message = f"{provider_name.title()} could not complete the request (upstream status {exc.status_code})."
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=http_status upstream_status=%s",
+            provider_name,
+            user_model_choice,
+            exc.status_code,
+        )
+        raise ProviderRequestError(message, status_code=local_status_code) from exc
+    except APITimeoutError as exc:
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=timeout",
+            provider_name,
+            user_model_choice,
+        )
+        raise ProviderRequestError(f"{provider_name.title()} request timed out. Wait and try again.", status_code=504) from exc
+    except APIConnectionError as exc:
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=connection error_type=%s",
+            provider_name,
+            user_model_choice,
+            type(exc).__name__,
+        )
+        raise ProviderRequestError(f"Could not connect to {provider_name.title()}. Check your internet connection and try again.") from exc
     except Exception as exc:
         # Do not surface SDK exception text; it can include request details.
-        raise RuntimeError("The selected provider could not complete the request.") from exc
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=unexpected error_type=%s",
+            provider_name,
+            user_model_choice,
+            type(exc).__name__,
+        )
+        raise ProviderRequestError(f"{provider_name.title()} could not complete the request.") from exc
 
 
 # --- Quick Test Execution ---
