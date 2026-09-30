@@ -5,8 +5,8 @@ import {
   PanelLeftClose, PanelLeftOpen, Paperclip, Plus, Search, Settings,
   ShieldCheck, Sparkles, Terminal, ThumbsDown, ThumbsUp, Workflow, X,
 } from 'lucide-react'
-import { generalAgent, promptIdeas } from './mock/data'
-import type { Agent, Chat, Message, ModelInfo } from './types'
+import { promptIdeas } from './mock/data'
+import type { AgentId, Chat, Message, ModelInfo } from './types'
 import * as api from './services/api'
 import bulbulitoLogo from './assets/BAI.png'
 import './App.css'
@@ -22,12 +22,14 @@ function AssistantAvatar() {
   return <BulbulitoMark size="small" />
 }
 
-function AgentIdentity({ agent }: { agent: Agent }) {
-  return <div className="agent-identity"><BulbulitoMark size="small" /><span className="agent-copy"><strong>{agent.name}</strong><span>{agent.role}</span></span><span className="online-dot" title="Online" /></div>
+function AgentIdentity({ agent }: { agent: AgentId }) {
+  const selected = agentChoices.find((item) => item.id === agent) ?? agentChoices[0]
+  return <div className="agent-identity"><BulbulitoMark size="small" /><span className="agent-copy"><strong>{selected.name}</strong><span>{selected.description}</span></span><span className="online-dot" title="Online" /></div>
 }
 
-function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onRename, onDelete, onSettings }: {
+function Sidebar({ chats, activeId, agent, collapsed, onToggle, onNew, onSelect, onRename, onDelete, onSettings }: {
   chats: Chat[]; activeId: string | null; collapsed: boolean; onToggle: () => void; onNew: () => void
+  agent: AgentId
   onSelect: (id: string) => void; onRename: (id: string, title: string) => Promise<void>
   onDelete: (id: string) => Promise<void>; onSettings: () => void
 }) {
@@ -123,7 +125,7 @@ function Sidebar({ chats, activeId, collapsed, onToggle, onNew, onSelect, onRena
       })}
       <div className="tools-preview"><div className="section-label">WORKSPACE</div><div className="future-tool"><FolderOpen size={15} /><span>Local files</span><span className="soon-tag">SOON</span></div><div className="future-tool"><Globe2 size={15} /><span>Web research</span><span className="soon-tag">SOON</span></div></div>
     </div>
-    <div className="sidebar-bottom"><AgentIdentity agent={generalAgent} /><button className="sidebar-setting" onClick={onSettings}><Settings size={16} /><span>Settings & providers</span><ChevronRight size={14} className="setting-chevron" /></button><div className="storage-status"><span className="storage-led" /><span>Local storage</span><span className="storage-label">READY</span></div></div>
+    <div className="sidebar-bottom"><AgentIdentity agent={agent} /><button className="sidebar-setting" onClick={onSettings}><Settings size={16} /><span>Settings & providers</span><ChevronRight size={14} className="setting-chevron" /></button><div className="storage-status"><span className="storage-led" /><span>Local storage</span><span className="storage-label">READY</span></div></div>
     {pendingDeleteId && <DeleteConversationDialog chat={chats.find((chat) => chat.id === pendingDeleteId) ?? null} onCancel={() => setPendingDeleteId(null)} onConfirm={() => void confirmDelete()} />}
   </aside>
 }
@@ -149,16 +151,31 @@ function Header({ title, modelId, models, onModel, onSettings, onSidebar }: { ti
   return <header className="topbar"><div className="topbar-title"><button className="icon-button mobile-menu" onClick={onSidebar} aria-label="Toggle sidebar"><Menu size={18} /></button><div className="breadcrumbs"><span className="breadcrumb-muted">Workspace</span><ChevronRight size={13} /><strong>{title}</strong></div></div><div className="topbar-actions"><div className="local-indicator"><span />Local workspace</div><ModelPicker current={modelId} models={models} onChange={onModel} /><button className="icon-button header-settings" aria-label="Settings" onClick={onSettings}><Settings size={17} /></button></div></header>
 }
 
-function Composer({ onSend, placeholder = 'Ask Bulbulito anything...', compact = false, disabled = false }: { onSend: (text: string) => void; placeholder?: string; compact?: boolean; disabled?: boolean }) {
+const agentChoices: { id: AgentId; name: string; description: string; symbol: string }[] = [
+  { id: 'jiniral', name: 'JINIRAL', description: 'General-purpose assistant', symbol: '✦' },
+  { id: 'bai-coding', name: 'BAI CODING', description: 'Programming and software engineering', symbol: '◇' },
+  { id: 'rizarts', name: 'RIZARTS', description: 'Web-grounded research and analysis', symbol: '◎' },
+]
+
+function Composer({ onSend, agent, onAgent, placeholder = 'Ask Bulbulito anything...', compact = false, disabled = false }: { onSend: (text: string) => void; agent: AgentId; onAgent: (agent: AgentId) => void; placeholder?: string; compact?: boolean; disabled?: boolean }) {
   const [value, setValue] = useState('')
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [agentsOpen, setAgentsOpen] = useState(false)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (!agentsOpen) return
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape') setAgentsOpen(false)
+    }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [agentsOpen])
   const send = () => { const text = value.trim(); if (!text) return; onSend(text); setValue(''); if (textarea.current) textarea.current.style.height = 'auto' }
   const submit = (event: FormEvent) => { event.preventDefault(); send() }
   const keyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } }
   const resize = () => { if (textarea.current) { textarea.current.style.height = 'auto'; textarea.current.style.height = `${Math.min(textarea.current.scrollHeight, 180)}px` } }
   return <div className={`composer-shell ${compact ? 'composer-compact' : ''}`}><form className="composer" onSubmit={submit}><textarea ref={textarea} value={value} onChange={(event) => { setValue(event.target.value); resize() }} onKeyDown={keyDown} placeholder={placeholder} rows={1} aria-label="Message Bulbulito" />
-    <div className="composer-toolbar"><div className="composer-left"><button type="button" className="composer-tool" title="Attach a file"><Paperclip size={16} /></button><div className="tools-wrap"><button type="button" className={`composer-tool tools-button ${toolsOpen ? 'tool-active' : ''}`} onClick={() => setToolsOpen((value) => !value)}><Plus size={16} /><span>Tools</span></button>{toolsOpen && <><button className="click-away" onClick={() => setToolsOpen(false)} aria-label="Close tools" /><div className="tools-menu"><div className="tools-menu-title">ADD A TOOL <span>COMING SOON</span></div><div><Globe2 size={15} />Web search</div><div><FileUp size={15} />Analyze files</div><div><Terminal size={15} />Run Python</div></div></>}</div><span className="composer-context">Local workspace</span></div><div className="composer-right"><span className="key-hint"><kbd>↵</kbd> to send</span><button type="submit" className="send-button" disabled={!value.trim() || disabled} aria-label="Send message"><ArrowUp size={18} /></button></div></div>
+    <div className="composer-toolbar"><div className="composer-left"><button type="button" className="composer-tool" title="Attach a file"><Paperclip size={16} /></button><div className="tools-wrap"><button type="button" className={`composer-tool tools-button ${toolsOpen ? 'tool-active' : ''}`} onClick={() => setToolsOpen((value) => !value)}><Plus size={16} /><span>Tools</span></button>{toolsOpen && <><button className="click-away" onClick={() => setToolsOpen(false)} aria-label="Close tools" /><div className="tools-menu"><div className="tools-menu-title">ADD A TOOL <span>COMING SOON</span></div><div><Globe2 size={15} />Web search</div><div><FileUp size={15} />Analyze files</div><div><Terminal size={15} />Run Python</div></div></>}</div><span className="composer-context">Local workspace</span></div><div className="composer-right"><span className="key-hint"><kbd>↵</kbd> to send</span><div className="agent-picker-wrap"><button type="button" className="agent-picker-button" disabled={disabled} onClick={() => { setToolsOpen(false); setAgentsOpen((value) => !value) }} aria-expanded={agentsOpen} aria-label={`Selected agent: ${agentChoices.find((item) => item.id === agent)?.name ?? 'JINIRAL'}`}><span>{agentChoices.find((item) => item.id === agent)?.symbol ?? '✦'}</span> {agentChoices.find((item) => item.id === agent)?.name ?? 'JINIRAL'} <ChevronDown size={12} /></button>{agentsOpen && <><button type="button" className="click-away agent-click-away" onClick={() => setAgentsOpen(false)} aria-label="Close agent selector" /><div className="agent-picker-menu" role="listbox" aria-label="Choose agent">{agentChoices.map((choice) => <button type="button" role="option" aria-selected={agent === choice.id} key={choice.id} className={agent === choice.id ? 'selected' : ''} onClick={() => { onAgent(choice.id); setAgentsOpen(false) }}><span className="agent-choice-heading"><span>{agent === choice.id ? '✓' : choice.symbol}</span>{choice.name}</span><small>{choice.description}</small></button>)}</div></>}</div><button type="submit" className="send-button" disabled={!value.trim() || disabled} aria-label="Send message"><ArrowUp size={18} /></button></div></div>
   </form><div className="composer-disclaimer">Bulbulito can make mistakes. Check important information.</div></div>
 }
 
@@ -168,12 +185,20 @@ function MessageBody({ content }: { content: string }) {
   let paragraph: string[] = []
   let codeLines: string[] = []
   let inCode = false
-  const inline = (text: string) => text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((part, index) => part.startsWith('**') ? <strong key={index}>{part.slice(2, -2)}</strong> : part.startsWith('`') ? <code key={index}>{part.slice(1, -1)}</code> : part)
+  const inline = (text: string) => text.split(/(\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\(https?:\/\/[^)\s]+\))/g).map((part, index) => {
+    const link = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)$/)
+    if (part.startsWith('**')) return <strong key={index}>{part.slice(2, -2)}</strong>
+    if (part.startsWith('`')) return <code key={index}>{part.slice(1, -1)}</code>
+    if (link) return <a key={index} href={link[2]} target="_blank" rel="noreferrer">{link[1]}</a>
+    return part
+  })
   const flushParagraph = () => { if (paragraph.length) { blocks.push(<p key={`p-${blocks.length}`}>{paragraph.map((line, index) => <span key={index}>{index > 0 && <br />}{inline(line)}</span>)}</p>); paragraph = [] } }
   lines.forEach((line) => {
     if (line.startsWith('```')) { if (inCode) { blocks.push(<CodeBlock key={`c-${blocks.length}`} code={codeLines.join('\n')} />); codeLines = []; inCode = false } else { flushParagraph(); inCode = true } }
     else if (inCode) codeLines.push(line)
     else if (!line.trim()) flushParagraph()
+    else if (line.startsWith('# ')) { flushParagraph(); blocks.push(<h2 key={`h-${blocks.length}`}>{inline(line.slice(2))}</h2>) }
+    else if (line.startsWith('## ')) { flushParagraph(); blocks.push(<h3 key={`h-${blocks.length}`}>{inline(line.slice(3))}</h3>) }
     else if (line.startsWith('- ')) { flushParagraph(); blocks.push(<div key={`li-${blocks.length}`} className="answer-list">· <span>{inline(line.slice(2))}</span></div>) }
     else paragraph.push(line)
   })
@@ -195,21 +220,22 @@ function MessageItem({ message, onRate }: { message: Message; onRate: (id: strin
   return <article className={`message-row ${isAssistant ? 'assistant-row' : 'user-row'}`}>{isAssistant ? <AssistantAvatar /> : <div className="user-avatar">J</div>}<div className="message-main"><div className="message-label"><strong>{isAssistant ? 'Bulbulito' : 'You'}</strong><time>{message.createdAt}</time></div><MessageBody content={message.content} />{isAssistant && <div className="message-actions"><button onClick={copy} title="Copy response">{copied ? <Check size={14} /> : <Copy size={14} />}<span>{copied ? 'Copied' : 'Copy'}</span></button><button title="Regenerate response"><ArrowDown size={14} /><span>Regenerate</span></button><span className="action-divider" /><button className={message.liked === true ? 'rated' : ''} aria-label="Helpful" onClick={() => onRate(message.id, message.liked === true ? null : true)}><ThumbsUp size={14} /></button><button className={message.liked === false ? 'rated' : ''} aria-label="Not helpful" onClick={() => onRate(message.id, message.liked === false ? null : false)}><ThumbsDown size={14} /></button></div>}</div></article>
 }
 
-function Conversation({ chat, onRate, onSend, sending }: { chat: Chat; onRate: (id: string, rating: boolean | null) => void; onSend: (text: string) => void; sending: boolean }) {
+function Conversation({ chat, onRate, onSend, onAgent, sending, progress }: { chat: Chat; onRate: (id: string, rating: boolean | null) => void; onSend: (text: string) => void; onAgent: (agent: AgentId) => void; sending: boolean; progress: string }) {
   const messagesEnd = useRef<HTMLDivElement>(null)
   useEffect(() => { messagesEnd.current?.scrollIntoView({ behavior: 'smooth' }) }, [chat.messages.length])
-  return <><div className="conversation-scroll"><div className="conversation-inner">{chat.messages.length ? chat.messages.map((message) => <MessageItem key={message.id} message={message} onRate={onRate} />) : <div className="empty-chat"><BulbulitoMark size="large" /><h2>Ready when you are.</h2><p>Your conversation starts with a question, a problem, or a curious thought.</p></div>}{sending && <div className="message-row assistant-row"><AssistantAvatar /><div className="message-main"><div className="message-label"><strong>Bulbulito</strong></div><p className="message-content">Thinking…</p></div></div>}<div ref={messagesEnd} /></div></div><Composer onSend={onSend} disabled={sending} /></>
+  const agentName = agentChoices.find((item) => item.id === chat.agent)?.name ?? 'JINIRAL'
+  return <><div className="conversation-scroll"><div className="conversation-inner">{chat.messages.length ? chat.messages.map((message) => <MessageItem key={message.id} message={message} onRate={onRate} />) : <div className="empty-chat"><BulbulitoMark size="large" /><h2>Ready when you are.</h2><p>Your conversation starts with a question, a problem, or a curious thought.</p></div>}{sending && <div className="message-row assistant-row"><AssistantAvatar /><div className="message-main"><div className="message-label"><strong>{agentName}</strong></div><p className="message-content">{progress || (chat.agent === 'rizarts' ? 'RIZARTS is researching...' : chat.agent === 'bai-coding' ? 'BAI CODING is working...' : 'JINIRAL is responding...')}</p></div></div>}<div ref={messagesEnd} /></div></div><Composer onSend={onSend} agent={chat.agent} onAgent={onAgent} disabled={sending} /></>
 }
 
-function Landing({ onPrompt }: { onPrompt: (text: string) => void }) {
+function Landing({ onPrompt, agent, onAgent }: { onPrompt: (text: string) => void; agent: AgentId; onAgent: (agent: AgentId) => void }) {
   const icons = { database: Database, terminal: Code2, workflow: Workflow, search: Search }
-  return <div className="landing-area"><div className="landing-content"><div className="landing-mark-wrap"><BulbulitoMark size="large" /><span className="orbit orbit-one" /><span className="orbit orbit-two" /></div><div className="landing-eyebrow"><span className="eyebrow-line" />YOUR LOCAL AI WORKSPACE<span className="eyebrow-line" /></div><h1>What are we<br /><em>building today?</em></h1><p className="landing-subtitle">A quiet place to think through code, data, research,<br className="desktop-break" /> and everything in between.</p><div className="landing-composer"><Composer onSend={onPrompt} compact /></div><div className="ideas-label"><span>NEED A STARTING POINT?</span><span className="ideas-line" /></div><div className="prompt-grid">{promptIdeas.map((idea) => { const Icon = icons[idea.icon as keyof typeof icons]; return <button key={idea.title} className="prompt-card" onClick={() => onPrompt(idea.title)}><span className="prompt-icon"><Icon size={16} /></span><span className="prompt-copy"><strong>{idea.title}</strong><small>{idea.detail}</small></span><ArrowUp size={14} className="prompt-arrow" /></button> })}</div><div className="future-chips"><span><ShieldCheck size={13} /> Private by default</span><i /><span><Bot size={13} /> Your models, your way</span><i /><span><Workflow size={13} /> Tools on the horizon</span></div></div></div>
+  return <div className="landing-area"><div className="landing-content"><div className="landing-mark-wrap"><BulbulitoMark size="large" /><span className="orbit orbit-one" /><span className="orbit orbit-two" /></div><div className="landing-eyebrow"><span className="eyebrow-line" />YOUR LOCAL AI WORKSPACE<span className="eyebrow-line" /></div><h1>What are we<br /><em>building today?</em></h1><p className="landing-subtitle">A quiet place to think through code, data, research,<br className="desktop-break" /> and everything in between.</p><div className="landing-composer"><Composer onSend={onPrompt} agent={agent} onAgent={onAgent} compact /></div><div className="ideas-label"><span>NEED A STARTING POINT?</span><span className="ideas-line" /></div><div className="prompt-grid">{promptIdeas.map((idea) => { const Icon = icons[idea.icon as keyof typeof icons]; return <button key={idea.title} className="prompt-card" onClick={() => onPrompt(idea.title)}><span className="prompt-icon"><Icon size={16} /></span><span className="prompt-copy"><strong>{idea.title}</strong><small>{idea.detail}</small></span><ArrowUp size={14} className="prompt-arrow" /></button> })}</div><div className="future-chips"><span><ShieldCheck size={13} /> Private by default</span><i /><span><Bot size={13} /> Your models, your way</span><i /><span><Workflow size={13} /> Tools on the horizon</span></div></div></div>
 }
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState('General')
   const sections = ['General', 'LLM Provider', 'Context & Memory', 'System Prompt', 'Agent Settings']
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><div><span className="settings-kicker">PREFERENCES</span><h2 id="settings-title">Workspace settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={18} /></button></header><div className="settings-body"><nav className="settings-nav">{sections.map((item) => <button key={item} className={section === item ? 'selected' : ''} onClick={() => setSection(item)}>{item}</button>)}</nav><div className="settings-panel">{section === 'General' && <><h3>Appearance</h3><p className="settings-description">Make the workspace feel like yours.</p><label className="settings-row"><span><strong>Theme</strong><small>Color palette for your workspace</small></span><select defaultValue="dark"><option value="dark">Midnight</option><option value="system">System</option></select></label><label className="settings-row"><span><strong>Accent</strong><small>A subtle highlight color</small></span><span className="accent-choice"><i /><i /><i className="selected" /><i /></span></label><div className="settings-divider" /><h3>Local credentials</h3><p className="settings-description">Provider credentials are read only by the local backend from the project root .env file. They are never stored in this browser.</p></>}{section === 'LLM Provider' && <><h3>LLM Provider</h3><p className="settings-description">Choose a model from the selector in the top bar. Configure provider credentials in the project root .env file, then restart the backend.</p></>}{section === 'Context & Memory' && <><h3>Context & Memory</h3><p className="settings-description">Conversation messages are saved locally by the backend.</p><div className="note-card"><ShieldCheck size={16} /><span>Chat history is stored as JSON on this device.</span></div></>}{section === 'System Prompt' && <><h3>System Prompt</h3><p className="settings-description">The backend applies Bulbulito's default system instruction to each chat.</p></>}{section === 'Agent Settings' && <><h3>Agent Settings</h3><p className="settings-description">Your agent lineup is taking shape.</p><div className="agent-preview-card"><AgentIdentity agent={generalAgent} /><span className="agent-current-badge">CURRENT</span></div><div className="future-agent-row"><span className="future-agent-icon"><Code2 size={17} /></span><span><strong>Bulbulito Code</strong><small>Coding agent · coming later</small></span><span className="soon-tag">SOON</span></div><div className="future-agent-row"><span className="future-agent-icon"><Search size={17} /></span><span><strong>Bulbulito Research</strong><small>Research agent · coming later</small></span><span className="soon-tag">SOON</span></div></>}</div></div><footer className="settings-footer"><span>Changes are saved in this session</span><button onClick={onClose}>Done</button></footer></section></div>
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><header className="settings-header"><div><span className="settings-kicker">PREFERENCES</span><h2 id="settings-title">Workspace settings</h2></div><button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={18} /></button></header><div className="settings-body"><nav className="settings-nav">{sections.map((item) => <button key={item} className={section === item ? 'selected' : ''} onClick={() => setSection(item)}>{item}</button>)}</nav><div className="settings-panel">{section === 'General' && <><h3>Appearance</h3><p className="settings-description">Make the workspace feel like yours.</p><label className="settings-row"><span><strong>Theme</strong><small>Color palette for your workspace</small></span><select defaultValue="dark"><option value="dark">Midnight</option><option value="system">System</option></select></label><label className="settings-row"><span><strong>Accent</strong><small>A subtle highlight color</small></span><span className="accent-choice"><i /><i /><i className="selected" /><i /></span></label><div className="settings-divider" /><h3>Local credentials</h3><p className="settings-description">Provider credentials are read only by the local backend from the project root .env file. They are never stored in this browser.</p></>}{section === 'LLM Provider' && <><h3>LLM Provider</h3><p className="settings-description">Choose a model from the selector in the top bar. Configure provider credentials in the project root .env file, then restart the backend.</p></>}{section === 'Context & Memory' && <><h3>Context & Memory</h3><p className="settings-description">Conversation messages are saved locally by the backend.</p><div className="note-card"><ShieldCheck size={16} /><span>Chat history is stored as JSON on this device.</span></div></>}{section === 'System Prompt' && <><h3>System Prompt</h3><p className="settings-description">The backend applies the selected assistant mode's system instruction.</p></>}{section === 'Agent Settings' && <><h3>Agent Settings</h3><p className="settings-description">Select the behavior for each conversation independently of its model.</p>{agentChoices.map((choice) => <div className="future-agent-row" key={choice.id}><span className="future-agent-icon">{choice.symbol}</span><span><strong>{choice.name}</strong><small>{choice.description}</small></span></div>)}</>}</div></div><footer className="settings-footer"><span>Changes are saved in this session</span><button onClick={onClose}>Done</button></footer></section></div>
 }
 
 function App() {
@@ -218,22 +244,26 @@ function App() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [modelId, setModelId] = useState('')
+  const [agent, setAgent] = useState<AgentId>('jiniral')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [sending, setSending] = useState(false)
+  const [agentSaving, setAgentSaving] = useState(false)
+  const [researchProgress, setResearchProgress] = useState('')
   const [error, setError] = useState<string | null>(null)
   const activeChat = chats.find((chat) => chat.id === activeId) ?? null
   const title = activeChat?.title ?? 'New conversation'
   const refreshChats = async () => {
     try { setChats(await api.getChats()) } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load conversations.') }
   }
-  const createChat = async (initialText?: string) => {
+  const createChat = async (initialText?: string, initialAgent: AgentId = agent) => {
     setError(null)
     try {
-      const chat = await api.createChat(modelId || undefined)
+      const chat = await api.createChat(modelId || undefined, initialAgent)
       setChats((current) => [chat, ...current.filter((item) => item.id !== chat.id)])
       setActiveId(chat.id)
-      if (initialText) await sendMessage(initialText, chat.id, modelId || chat.model)
+      setAgent(initialAgent)
+      if (initialText) await sendMessage(initialText, chat.id, modelId || chat.model, initialAgent)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create conversation.') }
   }
   const selectChat = async (id: string) => {
@@ -243,23 +273,42 @@ function App() {
       const chat = await api.getChat(id)
       setChats((current) => current.map((item) => item.id === id ? chat : item))
       setModelId(chat.model)
+      setAgent(chat.agent ?? 'jiniral')
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load conversation.') }
   }
-  const sendMessage = async (text: string, targetId = activeId, selectedModel = modelId) => {
-    if (!targetId) { await createChat(text); return }
-    if (!selectedModel || sending) return
+  const sendMessage = async (text: string, targetId = activeId, selectedModel = modelId, selectedAgent = agent) => {
+    if (!targetId) { await createChat(text, selectedAgent); return }
+    if (!selectedModel || sending || agentSaving) return
     setError(null)
+    setResearchProgress('')
     const userMessage: Message = { id: `pending-${Date.now()}`, role: 'user', content: text, createdAt: new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) }
     setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, messages: [...chat.messages, userMessage] } : chat))
     setSending(true)
     try {
-      const updated = await api.sendMessage(targetId, selectedModel, text)
+      const updated = await api.sendMessage(targetId, { model: selectedModel, agent: selectedAgent, content: text, research_depth: 'deep' }, setResearchProgress)
       setChats((current) => current.map((chat) => chat.id === targetId ? updated : chat))
       setModelId(updated.model)
+      setAgent(updated.agent)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not send your message.')
       setChats((current) => current.map((chat) => chat.id === targetId ? { ...chat, messages: chat.messages.filter((message) => message.id !== userMessage.id) } : chat))
-    } finally { setSending(false) }
+    } finally { setSending(false); setResearchProgress('') }
+  }
+  const changeAgent = async (nextAgent: AgentId) => {
+    if (sending || agentSaving) return
+    const previousAgent = agent
+    setAgent(nextAgent)
+    if (!activeId) return
+    setAgentSaving(true)
+    setChats((current) => current.map((chat) => chat.id === activeId ? { ...chat, agent: nextAgent } : chat))
+    try {
+      const updated = await api.setChatAgent(activeId, nextAgent)
+      setChats((current) => current.map((chat) => chat.id === activeId ? updated : chat))
+    } catch (cause) {
+      setAgent(previousAgent)
+      setChats((current) => current.map((chat) => chat.id === activeId ? { ...chat, agent: previousAgent } : chat))
+      setError(cause instanceof Error ? cause.message : 'Could not update this conversation agent.')
+    } finally { setAgentSaving(false) }
   }
   const rateMessage = (messageId: string, rating: boolean | null) => setChats((current) => current.map((chat) => ({ ...chat, messages: chat.messages.map((message) => message.id === messageId ? { ...message, liked: rating } : message) })))
   const renameChat = async (id: string, title: string) => {
@@ -271,7 +320,7 @@ function App() {
     try {
       await api.deleteChat(id)
       setChats((current) => current.filter((chat) => chat.id !== id))
-      if (activeId === id) setActiveId(null)
+      if (activeId === id) { setActiveId(null); setAgent('jiniral') }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : 'Could not delete conversation.'
       setError(message)
@@ -289,7 +338,7 @@ function App() {
     const hotkey = (event: globalThis.KeyboardEvent) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') { event.preventDefault(); setSearchOpen(true) } if (event.key === 'Escape') { setSearchOpen(false); setSettingsOpen(false) } }
     window.addEventListener('keydown', hotkey); return () => window.removeEventListener('keydown', hotkey)
   }, [])
-  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => void createChat()} onSelect={(id) => void selectChat(id)} onRename={renameChat} onDelete={deleteChat} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} models={models} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{error && <div role="alert" className="backend-error">{error}<button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={(text) => void sendMessage(text)} sending={sending} /> : <Landing onPrompt={(text) => void createChat(text)} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { void selectChat(id); setSearchOpen(false) }} />}</div>
+  return <div className="app-shell"><Sidebar chats={chats} activeId={activeId} agent={agent} collapsed={collapsed} onToggle={() => setCollapsed((value) => !value)} onNew={() => { setAgent('jiniral'); void createChat(undefined, 'jiniral') }} onSelect={(id) => void selectChat(id)} onRename={renameChat} onDelete={deleteChat} onSettings={() => setSettingsOpen(true)} /><main className="workspace"><Header title={title} modelId={modelId} models={models} onModel={setModelId} onSettings={() => setSettingsOpen(true)} onSidebar={() => setCollapsed((value) => !value)} />{error && <div role="alert" className="backend-error">{error}<button onClick={() => setError(null)} aria-label="Dismiss error">×</button></div>}{activeChat ? <Conversation chat={activeChat} onRate={rateMessage} onSend={(text) => void sendMessage(text)} onAgent={changeAgent} sending={sending || agentSaving} progress={researchProgress} /> : <Landing onPrompt={(text) => void createChat(text, agent)} agent={agent} onAgent={changeAgent} />}</main>{settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}{searchOpen && <SearchDialog chats={chats} onClose={() => setSearchOpen(false)} onSelect={(id) => { void selectChat(id); setSearchOpen(false) }} />}</div>
 }
 
 function SearchDialog({ chats, onClose, onSelect }: { chats: Chat[]; onClose: () => void; onSelect: (id: string) => void }) {

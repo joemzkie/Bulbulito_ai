@@ -1,4 +1,5 @@
 export type MessageRole = 'system' | 'user' | 'assistant'
+export type AgentId = 'jiniral' | 'bai-coding' | 'rizarts'
 
 export interface Message {
   id: string
@@ -14,6 +15,7 @@ export interface Chat {
   group: 'Today' | 'Recent' | 'Older'
   updatedAt: string
   model: string
+  agent: AgentId
   created_at: string
   updated_at: string
   messages: Message[]
@@ -24,11 +26,4 @@ export interface ModelInfo {
   name: string
   provider: string
   description: string
-}
-
-export interface Agent {
-  id: string
-  name: string
-  role: string
-  status: 'online' | 'offline'
 }

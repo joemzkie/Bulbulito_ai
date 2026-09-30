@@ -1,4 +1,4 @@
-import type { Chat, Message, ModelInfo } from '../types'
+import type { AgentId, Chat, Message, ModelInfo } from '../types'
 
 const API_BASE = 'http://localhost:8000/api'
 
@@ -12,6 +12,7 @@ interface ApiChat {
   id: string
   title: string
   model: string
+  agent?: AgentId
   created_at: string
   updated_at: string
   messages?: ApiMessage[]
@@ -42,6 +43,7 @@ function toChat(data: ApiChat): Chat {
     : updated.getFullYear() === today.getFullYear() ? 'Recent' : 'Older'
   return {
     ...data,
+    agent: data.agent ?? 'jiniral',
     group,
     updatedAt: updated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
     messages: (data.messages ?? []).map((message, index) => ({
@@ -68,26 +70,78 @@ export async function getChat(chatId: string): Promise<Chat> {
   return toChat(await request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`))
 }
 
-export async function createChat(model?: string): Promise<Chat> {
+export async function createChat(model?: string, agent: AgentId = 'jiniral'): Promise<Chat> {
   return toChat(await request<ApiChat>('/chats', {
     method: 'POST',
-    body: JSON.stringify(model ? { model } : {}),
+    body: JSON.stringify({ model, agent }),
   }))
 }
 
-export async function sendMessage(chatId: string, model: string, content: string): Promise<Chat> {
-  const result = await request<{ conversation: ApiChat }>(`/chats/${encodeURIComponent(chatId)}/messages`, {
+export interface SendMessageInput {
+  model: string
+  agent: AgentId
+  content: string
+  research_depth?: 'quick' | 'standard' | 'deep'
+  research_constraints?: string
+}
+
+export async function sendMessage(chatId: string, input: SendMessageInput, onProgress?: (status: string) => void): Promise<Chat> {
+  const response = await fetch(`${API_BASE}/chats/${encodeURIComponent(chatId)}/messages`, {
     method: 'POST',
-    body: JSON.stringify({ model, content }),
-  })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).catch(() => { throw new Error('Cannot reach the Bulbulito backend. Make sure FastAPI is running on port 8000.') })
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { detail?: string } | null
+    throw new Error(body?.detail ?? `Request failed (${response.status}).`)
+  }
+  if (response.headers.get('content-type')?.includes('text/event-stream')) {
+    if (!response.body) throw new Error('The research stream could not be opened.')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let completed: ApiChat | undefined
+    const handleFrame = (frame: string) => {
+      let event = 'message'
+      let data = ''
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+      }
+      if (!data) return
+      const parsed = JSON.parse(data) as { status?: string; detail?: string; conversation?: ApiChat }
+      if (event === 'progress' && parsed.status) onProgress?.(parsed.status)
+      else if (event === 'error') throw new Error(parsed.detail ?? 'RIZARTS could not complete this research request.')
+      else if (event === 'complete' && parsed.conversation) completed = parsed.conversation
+    }
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done }).replace(/\r\n/g, '\n')
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop() ?? ''
+      frames.forEach(handleFrame)
+      if (done) break
+    }
+    if (!completed) throw new Error('RIZARTS ended without a completed research response.')
+    return toChat(completed)
+  }
+  const result = await response.json() as { conversation: ApiChat }
   return toChat(result.conversation)
 }
 
-export async function renameChat(chatId: string, title: string): Promise<Chat> {
+async function updateChat(chatId: string, patch: { title?: string; agent?: AgentId }): Promise<Chat> {
   return toChat(await request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {
     method: 'PATCH',
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(patch),
   }))
+}
+
+export async function renameChat(chatId: string, title: string): Promise<Chat> {
+  return updateChat(chatId, { title })
+}
+
+export async function setChatAgent(chatId: string, agent: AgentId): Promise<Chat> {
+  return updateChat(chatId, { agent })
 }
 
 export async function deleteChat(chatId: string): Promise<void> {
