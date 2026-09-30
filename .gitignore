@@ -18,3 +18,13 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local application data contains private user content and must stay on this machine.
+/backend/data/
+
+# Build and packaging artifacts
+dist/
+build/
+*.egg-info/
+coverage/
+.coverage

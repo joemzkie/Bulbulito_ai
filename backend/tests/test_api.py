@@ -15,6 +15,7 @@ from app.main import app
 from app.storage import json_storage
 from app.providers.registry import MODEL_REGISTRY, PROVIDERS
 from app.providers import client as provider_client
+from app.providers import gemini as gemini_provider
 from app.providers import openrouter as openrouter_provider
 from app.providers.client import ProviderRequestError
 
@@ -33,7 +34,7 @@ class ChatApiTest(unittest.TestCase):
     def test_models_are_sanitized_and_complete(self):
         response = self.client.get("/api/models")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 15)
+        self.assertEqual(len(response.json()), 17)
         self.assertTrue(all(set(item) == {"name", "provider", "description"} for item in response.json().values()))
         self.assertNotIn("api_key", response.text.lower())
 
@@ -100,6 +101,63 @@ class ChatApiTest(unittest.TestCase):
             self.assertEqual(provider_client.call_chatbot("groq-llama-3.3-70b", [{"role": "user", "content": "test"}]), "ok")
         sdk_client.assert_called_once_with(base_url=config["base_url"], api_key=config["api_key"])
         factory.assert_not_called()
+
+    def test_gemini_dispatch_uses_native_endpoint_header_and_history(self):
+        request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+        response = httpx.Response(200, request=request, json={
+            "candidates": [{"content": {"parts": [
+                {"text": "private reasoning", "thought": True},
+                {"text": "ok"},
+            ]}}],
+        })
+        config = {**PROVIDERS["gemini"], "api_key": "test-token"}
+        messages = [
+            {"role": "system", "content": "Be helpful."},
+            {"role": "user", "content": "First turn"},
+            {"role": "assistant", "content": "Earlier answer"},
+            {"role": "user", "content": "Current turn"},
+        ]
+        with patch.dict(PROVIDERS, {"gemini": config}), patch.object(gemini_provider.httpx, "post", return_value=response) as post:
+            self.assertEqual(provider_client.call_chatbot("gemini-2.5-flash", messages), "ok")
+        args, kwargs = post.call_args
+        self.assertEqual(args[0], "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+        self.assertEqual(kwargs["headers"], {
+            "x-goog-api-key": "test-token",
+            "Content-Type": "application/json",
+        })
+        self.assertNotIn("Authorization", kwargs["headers"])
+        self.assertEqual(kwargs["json"]["systemInstruction"], {"parts": [{"text": "Be helpful."}]})
+        self.assertEqual(kwargs["json"]["contents"], [
+            {"role": "user", "parts": [{"text": "First turn"}]},
+            {"role": "model", "parts": [{"text": "Earlier answer"}]},
+            {"role": "user", "parts": [{"text": "Current turn"}]},
+        ])
+        self.assertEqual(kwargs["json"]["generationConfig"]["temperature"], 0.7)
+
+    def test_gemini_model_prefix_is_neither_missing_nor_doubled(self):
+        base = "https://generativelanguage.googleapis.com/v1beta/"
+        expected = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+        self.assertEqual(gemini_provider.generate_content_url(base, "gemini-2.5-flash"), expected)
+        self.assertEqual(gemini_provider.generate_content_url(base, "models/gemini-2.5-flash"), expected)
+        self.assertEqual(gemini_provider.generate_content_url(base, "models/models/gemini-2.5-flash"), expected)
+
+    def test_gemini_3_dispatch_omits_unsupported_temperature(self):
+        request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
+        response = httpx.Response(200, request=request, json={"candidates": [{"content": {"parts": [{"text": "ok"}]}}]})
+        config = {**PROVIDERS["gemini"], "api_key": "test-token"}
+        with patch.dict(PROVIDERS, {"gemini": config}), patch.object(gemini_provider.httpx, "post", return_value=response) as post:
+            self.assertEqual(provider_client.call_chatbot("gemini-3.8-flash", [{"role": "user", "content": "test"}]), "ok")
+        self.assertNotIn("generationConfig", post.call_args.kwargs["json"])
+
+    def test_gemini_404_error_identifies_model_availability(self):
+        request = httpx.Request("POST", "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent")
+        response = httpx.Response(404, request=request, json={"error": {"message": "private upstream body"}})
+        config = {**PROVIDERS["gemini"], "api_key": "test-token"}
+        with patch.dict(PROVIDERS, {"gemini": config}), patch.object(gemini_provider.httpx, "post", return_value=response):
+            with self.assertRaises(ProviderRequestError) as raised:
+                provider_client.call_chatbot("gemini-3.8-flash", [{"role": "user", "content": "test"}])
+        self.assertIn("unavailable to this API project", str(raised.exception))
+        self.assertNotIn("private upstream body", str(raised.exception))
 
     def test_openrouter_registry_uses_current_free_model_slugs(self):
         self.assertEqual(MODEL_REGISTRY["or-qwen-coder"]["model_id"], "qwen/qwen3.8-27b:free")

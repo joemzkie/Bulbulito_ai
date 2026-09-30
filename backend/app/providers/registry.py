@@ -18,7 +18,7 @@ PROVIDERS = {
         "api_key": os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER"),
     },
     "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/",
         "api_key": os.getenv("GEMINI_API_KEY") or os.getenv("GEMINI"),
     },
     "openai": {
@@ -126,6 +126,18 @@ MODEL_REGISTRY = {
         "model_id": "gemini-2.5-flash-lite",
         "name": "Gemini 2.5 Flash-Lite",
         "description": "Lightweight tasks and extraction"
+    },
+    "gemini-3.8-flash": {
+        "provider": "gemini",
+        "model_id": "gemini-3.8-flash",
+        "name": "Gemini 3.8 Flash",
+        "description": "Current-generation reasoning and multimodal assistant"
+    },
+    "gemini-3.5-flash-lite": {
+        "provider": "gemini",
+        "model_id": "gemini-3.5-flash-lite",
+        "name": "Gemini 3.5 Flash-Lite",
+        "description": "Fast, cost-efficient model for planning and extraction"
     }
 }
 

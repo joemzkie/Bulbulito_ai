@@ -57,6 +57,7 @@ class JsonConversationStorage:
             try:
                 data = json.loads(file.read_text(encoding="utf-8"))
                 data.pop("messages", None)
+                data.setdefault("agent", "jiniral")
                 results.append(data)
             except (OSError, json.JSONDecodeError):
                 continue

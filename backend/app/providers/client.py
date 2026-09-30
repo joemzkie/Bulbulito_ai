@@ -1,8 +1,10 @@
 import logging
 
+import httpx
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from .registry import PROVIDERS, MODEL_REGISTRY
 from .openrouter import create_openrouter_client
+from .gemini import call_gemini
 
 logger = logging.getLogger("bulbulito.providers")
 
@@ -42,7 +44,7 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
     # 3. Dynamic client initialization
     if provider_name == "openrouter":
         client = create_openrouter_client(provider_config)
-    else:
+    elif provider_name != "gemini":
         client = OpenAI(
             base_url=provider_config["base_url"],
             api_key=provider_config["api_key"]
@@ -54,13 +56,23 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
         "messages": messages,
     }
 
-    # OpenAI reasoning models (o1, o3-mini) do not accept custom temperatures
-    is_reasoning_model = model_config["model_id"].startswith(("o1", "o3"))
+    # OpenAI reasoning models and Gemini 3 models do not accept custom temperatures.
+    model_id = model_config["model_id"]
+    is_reasoning_model = model_id.startswith(("o1", "o3", "gemini-3"))
     if not is_reasoning_model:
         payload["temperature"] = temperature
 
-    # 5. Dispatch request
+    # 5. Dispatch request. Gemini uses its native GenerateContent endpoint so
+    # AQ-format API keys are sent in x-goog-api-key, never as Bearer tokens.
     try:
+        if provider_name == "gemini":
+            return call_gemini(
+                base_url=provider_config["base_url"],
+                api_key=provider_config["api_key"],
+                model_id=model_id,
+                messages=messages,
+                temperature=temperature,
+            )
         response = client.chat.completions.create(**payload)
         content = response.choices[0].message.content
         if not isinstance(content, str):
@@ -72,6 +84,8 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
         local_status_code = 502
         if provider_name == "openrouter" and exc.status_code == 404:
             message = f"OpenRouter model '{model_config['model_id']}' was not found or is no longer available on the free tier."
+        elif provider_name == "gemini" and exc.status_code == 404:
+            message = f"Gemini model '{model_config['model_id']}' was not found or is unavailable to this API project. Check the model's current API availability."
         elif exc.status_code in (401, 403):
             message = f"{provider_name.title()} rejected the configured credentials. Check the provider entry in the project root .env file."
         elif exc.status_code == 402:
@@ -90,6 +104,44 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
             exc.status_code,
         )
         raise ProviderRequestError(message, status_code=local_status_code) from exc
+    except httpx.HTTPStatusError as exc:
+        upstream_status = exc.response.status_code
+        local_status_code = 502
+        if provider_name == "gemini" and upstream_status == 404:
+            message = f"Gemini model '{model_config['model_id']}' was not found or is unavailable to this API project. Check the model's current API availability."
+        elif upstream_status in (401, 403):
+            message = f"{provider_name.title()} rejected the configured credentials. Check the provider entry in the project root .env file."
+        elif upstream_status == 402:
+            message = f"{provider_name.title()} requires available credits or a paid model for this request."
+        elif upstream_status == 429:
+            message = f"{provider_name.title()} rate limit reached. Wait and try again."
+            local_status_code = 429
+        elif upstream_status == 400:
+            message = f"{provider_name.title()} rejected the request parameters for model '{model_config['model_id']}'."
+        else:
+            message = f"{provider_name.title()} could not complete the request (upstream status {upstream_status})."
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=http_status upstream_status=%s",
+            provider_name,
+            user_model_choice,
+            upstream_status,
+        )
+        raise ProviderRequestError(message, status_code=local_status_code) from exc
+    except httpx.TimeoutException as exc:
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=timeout",
+            provider_name,
+            user_model_choice,
+        )
+        raise ProviderRequestError(f"{provider_name.title()} request timed out. Wait and try again.", status_code=504) from exc
+    except httpx.RequestError as exc:
+        logger.warning(
+            "Provider request failed: provider=%s model_key=%s category=connection error_type=%s",
+            provider_name,
+            user_model_choice,
+            type(exc).__name__,
+        )
+        raise ProviderRequestError(f"Could not connect to {provider_name.title()}. Check your internet connection and try again.") from exc
     except APITimeoutError as exc:
         logger.warning(
             "Provider request failed: provider=%s model_key=%s category=timeout",
