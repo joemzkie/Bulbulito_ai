@@ -31,6 +31,20 @@ PROVIDERS = {
 # 2. Unified Model Catalog
 MODEL_REGISTRY = {
     # --- OpenAI (Uses your $50 credit balance) ---
+    "openai-gpt-5.6-sol": {
+        "provider": "openai",
+        "model_id": "gpt-5.6-sol",
+        "name": "GPT-5.6 Sol",
+        "description": "Flagship model for complex coding, reasoning, research, and professional work",
+        "supports_temperature": False,
+    },
+    "openai-gpt-5.6-luna": {
+        "provider": "openai",
+        "model_id": "gpt-5.6-luna",
+        "name": "GPT-5.6 Luna",
+        "description": "Fast, efficient model for everyday chat, coding, and high-volume tasks",
+        "supports_temperature": False,
+    },
     "openai-gpt-4o": {
         "provider": "openai",
         "model_id": "gpt-4o",

@@ -34,9 +34,38 @@ class ChatApiTest(unittest.TestCase):
     def test_models_are_sanitized_and_complete(self):
         response = self.client.get("/api/models")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 17)
+        self.assertEqual(len(response.json()), 19)
         self.assertTrue(all(set(item) == {"name", "provider", "description"} for item in response.json().values()))
         self.assertNotIn("api_key", response.text.lower())
+        self.assertNotIn("OPENAI_API_KEY", response.text)
+        self.assertEqual(response.json()["openai-gpt-5.6-sol"], {
+            "name": "GPT-5.6 Sol",
+            "provider": "openai",
+            "description": "Flagship model for complex coding, reasoning, research, and professional work",
+        })
+        self.assertEqual(response.json()["openai-gpt-5.6-luna"], {
+            "name": "GPT-5.6 Luna",
+            "provider": "openai",
+            "description": "Fast, efficient model for everyday chat, coding, and high-volume tasks",
+        })
+
+    def test_gpt56_models_use_openai_ids_without_custom_temperature(self):
+        response = type("Response", (), {"choices": [type("Choice", (), {"message": type("Message", (), {"content": "ok"})()})()]})()
+        completions = Mock(return_value=response)
+        fake_client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=completions)))
+        config = {"base_url": "https://api.openai.com/v1", "api_key": "test-token"}
+
+        with patch.dict(PROVIDERS, {"openai": config}), patch.object(provider_client, "OpenAI", return_value=fake_client) as sdk_client:
+            for model_key, model_id in (
+                ("openai-gpt-5.6-sol", "gpt-5.6-sol"),
+                ("openai-gpt-5.6-luna", "gpt-5.6-luna"),
+            ):
+                with self.subTest(model_key=model_key):
+                    self.assertEqual(provider_client.call_chatbot(model_key, [{"role": "user", "content": "Hi"}]), "ok")
+                    payload = completions.call_args.kwargs
+                    self.assertEqual(payload["model"], model_id)
+                    self.assertNotIn("temperature", payload)
+        self.assertEqual(sdk_client.call_args.kwargs["base_url"], config["base_url"])
 
     def test_conversation_crud_and_history(self):
         created = self.client.post("/api/chats", json={"model": "groq-gpt-oss-120b"})

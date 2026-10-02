@@ -59,7 +59,7 @@ def call_chatbot(user_model_choice: str, messages: list, temperature: float = 0.
     # OpenAI reasoning models and Gemini 3 models do not accept custom temperatures.
     model_id = model_config["model_id"]
     is_reasoning_model = model_id.startswith(("o1", "o3", "gemini-3"))
-    if not is_reasoning_model:
+    if model_config.get("supports_temperature", not is_reasoning_model):
         payload["temperature"] = temperature
 
     # 5. Dispatch request. Gemini uses its native GenerateContent endpoint so
