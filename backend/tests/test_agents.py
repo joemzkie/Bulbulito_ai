@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient
 from app.main import app
+from app.prompts import BAI_CODING_PROMPT
 from app.storage import json_storage
 from app.research import orchestrator
 from app.research import retriever
@@ -54,7 +55,7 @@ class AgentApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         selected_model, messages = dispatch.call_args.args
         self.assertEqual(selected_model, "groq-gpt-oss-120b")
-        self.assertIn("BAI CODING", messages[0]["content"])
+        self.assertEqual(messages[0]["content"], BAI_CODING_PROMPT)
         self.assertEqual(messages[-1], {"role": "user", "content": "Why KeyError?"})
         self.assertEqual(response.json()["conversation"]["agent"], "bai-coding")
         with patch("app.services.chat_service.call_chatbot", return_value="general answer") as dispatch:
@@ -66,6 +67,22 @@ class AgentApiTests(unittest.TestCase):
         self.assertIn("You are JINIRAL", general_messages[0]["content"])
         self.assertTrue(any(message["content"] == "Why KeyError?" for message in general_messages))
         self.assertEqual(general.json()["conversation"]["agent"], "jiniral")
+
+    def test_bai_coding_prompt_covers_reasoning_and_capability_boundaries(self):
+        for required_guidance in (
+            "not an autonomous coding agent",
+            "must not edit, create, or delete files",
+            "execute terminal commands",
+            "only receive the conversation and the code or context the user provides",
+            "Never claim to have inspected files",
+            "Never claim to have run or tested code",
+            "Keep this reasoning private",
+            "Separate what the code shows from possibilities that depend on missing context",
+            "smallest correct fix",
+            "Do not rewrite unrelated code",
+        ):
+            with self.subTest(guidance=required_guidance):
+                self.assertIn(required_guidance, BAI_CODING_PROMPT)
 
     def test_invalid_agent_is_rejected(self):
         chat = self.create_chat()
