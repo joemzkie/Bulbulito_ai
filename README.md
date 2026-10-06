@@ -23,10 +23,24 @@ The frontend talks to the local FastAPI backend. Provider credentials are read b
 Bulbulito has three agent modes:
 
 - **JINIRAL** is the default general-purpose assistant.
-- **BAI CODING** focuses on software development and technical problem solving.
+- **BAI CODING** is the software-engineering assistant for programming, debugging, architecture, databases, APIs, data engineering, and algorithms.
 - **RIZARTS** runs the research workflow described below.
 
 The model selector and agent selector control different things. For JINIRAL and BAI CODING, the selected model comes from the backend model registry and is combined with the selected agent's behavior prompt. RIZARTS uses its configured research-stage models; the top model selection does not imply that every research stage uses that model.
+
+### BAI CODING harness
+
+BAI CODING is a guided chat mode, not an autonomous coding agent or a tool runner. The backend adds its coding instructions as a system prompt, then sends that prompt with the latest 40 user and assistant messages to the selected model. It has no access to the repository or terminal through this harness: it can only reason about code and project details included in the conversation. It must not claim to have inspected files, run commands, or tested code. It can suggest focused code for the user to review and apply.
+
+The instructions guide BAI CODING to:
+
+- Understand the request and the supplied code before proposing an answer, while keeping private reasoning private.
+- Ground debugging in the provided inputs, outputs, types, data flow, and error paths; separate confirmed facts from assumptions.
+- Identify the failure and its cause before offering the smallest suitable fix, with a concise explanation and relevant tradeoffs.
+- Preserve the existing framework and architecture unless there is a clear reason to change them, and avoid unrelated rewrites or invented project details.
+- Ask for specific missing context when it is needed to confirm a diagnosis, and keep code examples focused on the stated language and libraries.
+
+The harness is defined by `BAI_CODING_PROMPT` in `backend/app/prompts.py` and selected for the `bai-coding` agent in `backend/app/services/chat_service.py`.
 
 ## Conversation history and context
 
